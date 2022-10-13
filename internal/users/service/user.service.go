@@ -1,21 +1,29 @@
 package service
 
 import (
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"log"
 	"net/http"
 
 	"github.com/KernelGamut32/gameserver/internal/users"
-	"github.com/KernelGamut32/gameserver/internal/users/db"
 	"github.com/gorilla/mux"
-	"golang.org/x/crypto/bcrypt"
 )
 
-var usersDb = db.Get()
+var usersService *UsersService
 
-func Login(w http.ResponseWriter, r *http.Request) {
+func Get() *UsersService {
+	if usersService == nil {
+		usersService = &UsersService{DB: GetUsersDataStore()}
+		return usersService
+	}
+	return usersService
+}
+
+type UsersService struct {
+	DB users.UserDatastore
+}
+
+func (us *UsersService) Login(w http.ResponseWriter, r *http.Request) {
 	user := &users.User{}
 	err := json.NewDecoder(r.Body).Decode(user)
 	if err != nil {
@@ -23,10 +31,10 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	currUser, err := FindUser(user.Email, user.Password)
+	currUser, err := us.DB.FindUser(user.Email, user.Password)
 
 	if err != nil {
-		log.Print("error occurred in FindUser ", err.Error())
+		log.Print("error occurred in Login ", err.Error())
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -35,148 +43,70 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-func FindUser(email, password string) (*users.User, error) {
-	user := &users.User{}
-
-	row := usersDb.QueryRow("select id, name, email, password from users where email = ?",
-		email)
-	err := row.Scan(&user.ID, &user.Name, &user.Email, &user.Password)
-
-	if err == sql.ErrNoRows {
-		return nil, errors.New("email address not found")
-	}
-
-	errf := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
-	if errf != nil { //Password does not match!
-		return nil, errors.New("invalid login credentials")
-	}
-
-	return user, nil
-}
-
-//CreateUser function -- create a new user
-func CreateUser(w http.ResponseWriter, r *http.Request) {
+func (us *UsersService) CreateUser(w http.ResponseWriter, r *http.Request) {
 	user := &users.User{}
 	json.NewDecoder(r.Body).Decode(user)
 
-	_, err := FindUser(user.Email, user.Password)
+	_, err := us.DB.FindUser(user.Email, user.Password)
 
 	if err == nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	pass, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
-	if err != nil {
-		log.Println(err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	user.Password = string(pass)
-
-	result, err := usersDb.Exec("insert into users (name, email, password) values (?, ?, ?)",
-		user.Name, user.Email, user.Password)
-
-	if err != nil {
+	if err := us.DB.CreateUser(user); err != nil {
 		log.Print("error occurred in CreateUser ", err.Error())
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-
-	if id, e := result.LastInsertId(); e != nil {
-		log.Println("no rows affected")
-		return
-	} else {
-		user.ID = uint(id)
-	}
-
 	w.WriteHeader(http.StatusCreated)
-
 	var resp = map[string]interface{}{"status": true, "user": user}
 	json.NewEncoder(w).Encode(resp)
 }
 
-//FetchUser function
-func FetchUsers(w http.ResponseWriter, r *http.Request) {
-	var theUsers []users.User
-
-	rows, err := usersDb.Query("select id, name, email, password from users")
+func (us *UsersService) FetchUsers(w http.ResponseWriter, r *http.Request) {
+	theUsers, err := us.DB.GetAllUsers()
 	if err != nil {
 		log.Print("error occurred in FetchUsers ", err.Error())
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var user users.User
-		rows.Scan(&user.ID, &user.Name, &user.Email, &user.Password)
-		theUsers = append(theUsers, user)
-	}
 	json.NewEncoder(w).Encode(theUsers)
 }
 
-func UpdateUser(w http.ResponseWriter, r *http.Request) {
-	user := &users.User{}
+func (us *UsersService) UpdateUser(w http.ResponseWriter, r *http.Request) {
+	user := users.User{}
 	params := mux.Vars(r)
 	var id = params["id"]
 
-	json.NewDecoder(r.Body).Decode(user)
+	json.NewDecoder(r.Body).Decode(&user)
 
-	pass, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
-	if err != nil {
-		log.Println(err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	user.Password = string(pass)
-
-	result, err := usersDb.Exec("update users set name = ?, email = ?, password = ? where id = ?",
-		user.Name, user.Email, user.Password, id)
-	if err != nil {
+	if err := us.DB.UpdateUser(id, &user); err != nil {
 		log.Print("error occurred in UpdateUser ", err.Error())
 		w.WriteHeader(http.StatusInternalServerError)
-	}
-	num, err := result.RowsAffected()
-	if err != nil {
-		log.Print("could not update database ", err.Error())
-		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	log.Println("number of rows affected is ", num)
 	json.NewEncoder(w).Encode(&user)
 }
 
-func DeleteUser(w http.ResponseWriter, r *http.Request) {
+func (us *UsersService) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	var id = params["id"]
 
-	result, err := usersDb.Exec("delete from users where id = ?", id)
-	if err != nil {
+	if err := us.DB.DeleteUser(id); err != nil {
 		log.Print("error occurred in DeleteUser ", err.Error())
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	_, err = result.RowsAffected()
-	if err != nil {
-		log.Print("could not update database ", err.Error())
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
 	json.NewEncoder(w).Encode("User deleted")
 }
 
-func GetUser(w http.ResponseWriter, r *http.Request) {
+func (us *UsersService) GetUser(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	var id = params["id"]
-	var user users.User
 
-	row := usersDb.QueryRow("select id, name, email, password from users where id = ?", id)
-	err := row.Scan(&user.ID, &user.Name, &user.Email, &user.Password)
+	user, err := us.DB.GetUser(id)
 
 	if err != nil {
 		log.Print("error occurred in GetUser ", err.Error())
