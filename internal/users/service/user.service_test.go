@@ -88,6 +88,24 @@ func (dbMock *UserDatastoreMock) GetUser(id string) (users.User, error) {
 	return users.User{}, errors.New("service_test - could not find user")
 }
 
+type JwtVerifyMock struct{}
+
+func (jwtMock *JwtVerifyMock) IsTokenExists(r *http.Request) (bool, string) {
+	return true, "a-mocked-token"
+}
+
+func (jwtMock *JwtVerifyMock) IsUserTokenValid(token string) bool {
+	return true
+}
+
+func (jwtMock *JwtVerifyMock) UserFromToken(tokenString string) (*users.User, error) {
+	return nil, nil
+}
+
+func (jwtMock *JwtVerifyMock) GetTokenForUser(user *users.User) (string, error) {
+	return "a-mocked-token", nil
+}
+
 func TestUsersService_Login(t *testing.T) {
 	type fields struct {
 		DB users.UserDatastore
@@ -128,6 +146,7 @@ func TestUsersService_Login(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			us := &service.UsersService{
 				DB: tt.fields.DB,
+				JwtAuth: &JwtVerifyMock{},
 			}
 			dbMock := tt.fields.DB.(*UserDatastoreMock)
 			dbMock.init()
@@ -180,6 +199,7 @@ func TestUsersService_CreateUser(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			us := &service.UsersService{
 				DB: tt.fields.DB,
+				JwtAuth: &JwtVerifyMock{},
 			}
 			jsonuser, _ := json.Marshal(tt.args.user)
 			req, _ := http.NewRequest("POST", "/register", strings.NewReader(string(jsonuser)))
@@ -207,6 +227,7 @@ func TestUsersService_CreateUser(t *testing.T) {
 func TestUsersService_FetchUsers(t *testing.T) {
 	us := &service.UsersService{
 		DB: &UserDatastoreMock{},
+		JwtAuth: &JwtVerifyMock{},
 	}
 
 	dbMock := us.DB.(*UserDatastoreMock)

@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/KernelGamut32/gameserver/internal/users"
+	"github.com/KernelGamut32/gameserver/internal/users/auth"
 	"github.com/gorilla/mux"
 )
 
@@ -13,14 +14,15 @@ var usersService *UsersService
 
 func Get() *UsersService {
 	if usersService == nil {
-		usersService = &UsersService{DB: GetUsersDataStore()}
+		usersService = &UsersService{DB: GetUsersDataStore(), JwtAuth: auth.GetAuthenticator()}
 		return usersService
 	}
 	return usersService
 }
 
 type UsersService struct {
-	DB users.UserDatastore
+	DB      users.UserDatastore
+	JwtAuth users.UserAuth
 }
 
 func (us *UsersService) Login(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +41,21 @@ func (us *UsersService) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var resp = map[string]interface{}{"status": true, "user": currUser}
+	tokenString, err := us.JwtAuth.GetTokenForUser(currUser)
+	if err != nil {
+		log.Print("error occurred processing token ", err.Error())
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:       auth.TokenName,
+		Value:      tokenString,
+		Path:       "/",
+		RawExpires: "0",
+	})
+
+	var resp = map[string]interface{}{"status": true, "access-token": tokenString, "user": currUser}
 	json.NewEncoder(w).Encode(resp)
 }
 
@@ -59,8 +75,16 @@ func (us *UsersService) CreateUser(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+
+	tokenString, err := us.JwtAuth.GetTokenForUser(user)
+	if err != nil {
+		log.Print("error occurred processing token ", err.Error())
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
 	w.WriteHeader(http.StatusCreated)
-	var resp = map[string]interface{}{"status": true, "user": user}
+	var resp = map[string]interface{}{"status": true, "user": user, "access-token": tokenString}
 	json.NewEncoder(w).Encode(resp)
 }
 

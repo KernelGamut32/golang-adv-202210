@@ -3,8 +3,9 @@ package routes
 import (
 	"net/http"
 
-	"github.com/gorilla/mux"
+	"github.com/KernelGamut32/gameserver/internal/users/auth"
 	usersService "github.com/KernelGamut32/gameserver/internal/users/service"
+	"github.com/gorilla/mux"
 )
 
 func CommonMiddleware(next http.Handler) http.Handler {
@@ -23,12 +24,17 @@ func Handlers() *mux.Router {
 	r.Use(CommonMiddleware)
 
 	us := usersService.Get()
+	jv := auth.GetAuthenticator()
 
 	r.HandleFunc("/register", us.CreateUser).Methods("POST")
 	r.HandleFunc("/login", us.Login).Methods("POST")
-	r.HandleFunc("/user", us.FetchUsers).Methods("GET")
-	r.HandleFunc("/user/{id}", us.GetUser).Methods("GET")
-	r.HandleFunc("/user/{id}", us.UpdateUser).Methods("PUT")
-	r.HandleFunc("/user/{id}", us.DeleteUser).Methods("DELETE")
+
+	s := r.PathPrefix("/auth").Subrouter()
+	s.Use(jv.JwtVerify)
+	s.HandleFunc("/user", us.FetchUsers).Methods("GET")
+	s.HandleFunc("/user/{id}", us.GetUser).Methods("GET")
+	s.HandleFunc("/user/{id}", us.UpdateUser).Methods("PUT")
+	s.HandleFunc("/user/{id}", us.DeleteUser).Methods("DELETE")
+
 	return r
 }

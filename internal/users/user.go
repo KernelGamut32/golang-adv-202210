@@ -1,5 +1,7 @@
 package users
 
+import "net/http"
+
 type User struct {
 	ID       uint   `json:"id"`
 	Name     string `json:"name"`
@@ -14,4 +16,11 @@ type UserDatastore interface {
 	UpdateUser(id string, user *User) error
 	DeleteUser(id string) error
 	GetUser(id string) (User, error)
+}
+
+type UserAuth interface {
+	IsTokenExists(r *http.Request) (bool, string)
+	IsUserTokenValid(token string) bool
+	UserFromToken(tokenString string) (*User, error)
+	GetTokenForUser(user *User) (string, error)
 }
